@@ -484,14 +484,52 @@ class PaddedAlignAttWhisper:
                 t = torch.cat(mat, dim=1)
                 tmp.append(t) 
             attn_of_alignment_heads = torch.stack(tmp, dim=1)
-#            logger.debug(str(attn_of_alignment_heads.shape) + " tttady")
+
+            # DEBUG: Log attention processing steps
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("="*60)
+                logger.debug(f"ATTENTION PROCESSING - Token count: {attn_of_alignment_heads.shape[2]}")
+                logger.debug(f"Step 1 - Raw shape: {attn_of_alignment_heads.shape}, content_frames: {content_mel_len}")
+                if attn_of_alignment_heads.shape[2] > 0 and attn_of_alignment_heads.shape[3] > 10:
+                    raw_vals = attn_of_alignment_heads[0, 0, 0, :10].tolist()
+                    logger.debug(f"  Raw [0,0,0,0:10]: {[f'{v:.6f}' for v in raw_vals]}")
+
             std, mean = torch.std_mean(attn_of_alignment_heads, dim=-2, keepdim=True, unbiased=False)
             attn_of_alignment_heads = (attn_of_alignment_heads - mean) / std
+
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Step 2 - After z-score")
+                if attn_of_alignment_heads.shape[2] > 0 and attn_of_alignment_heads.shape[3] > 10:
+                    norm_vals = attn_of_alignment_heads[0, 0, 0, :10].tolist()
+                    logger.debug(f"  Normalized [0,0,0,0:10]: {[f'{v:.6f}' for v in norm_vals]}")
+
             attn_of_alignment_heads = median_filter(attn_of_alignment_heads, 7) # from whisper.timing
+
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Step 3 - After median filter")
+                if attn_of_alignment_heads.shape[2] > 0 and attn_of_alignment_heads.shape[3] > 10:
+                    med_vals = attn_of_alignment_heads[0, 0, 0, :10].tolist()
+                    logger.debug(f"  Median [0,0,0,0:10]: {[f'{v:.6f}' for v in med_vals]}")
+
             attn_of_alignment_heads = attn_of_alignment_heads.mean(dim=1)
-#            logger.debug(str(attn_of_alignment_heads.shape) + " po mean")
+
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Step 4 - After averaging heads, shape: {attn_of_alignment_heads.shape}")
+                if attn_of_alignment_heads.shape[1] > 0 and attn_of_alignment_heads.shape[2] > 10:
+                    avg_vals = attn_of_alignment_heads[0, 0, :10].tolist()
+                    logger.debug(f"  Averaged [0,0,0:10]: {[f'{v:.6f}' for v in avg_vals]}")
+
             attn_of_alignment_heads = attn_of_alignment_heads[:,:, :content_mel_len]
-#            logger.debug(str(attn_of_alignment_heads.shape) + " pak ")
+
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Step 5 - After slicing to content, shape: {attn_of_alignment_heads.shape}")
+                # Show argmax for each token
+                for tok_idx in range(min(attn_of_alignment_heads.shape[1], 10)):
+                    tok_attn = attn_of_alignment_heads[0, tok_idx, :]
+                    max_frame = torch.argmax(tok_attn).item()
+                    max_val = tok_attn[max_frame].item()
+                    logger.debug(f"  Token {tok_idx}: argmax=Frame {max_frame} (val={max_val:.4f})")
+                logger.debug("="*60)
 
             # for each beam, the most attended frame is:
             most_attended_frames = torch.argmax(attn_of_alignment_heads[:,-1,:], dim=-1)
